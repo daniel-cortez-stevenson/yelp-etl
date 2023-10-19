@@ -1,0 +1,33 @@
+[tool.poetry]
+name = "yelp-etl"
+version = "0.1.0"
+description = "Extract & transform (with compute provided by Spark) the [Yelp Academic Dataset](https://www.yelp.com/dataset/documentation/main) in an [Apache Iceberg](https://iceberg.apache.org/docs/latest/spark-writes/) data lake (with object storage provided by Minio)."
+authors = ["Daniel Stevenson <26047171+daniel-cortez-stevenson@users.noreply.github.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "~3.8.1"
+pyspark = "3.5.0"
+s3fs = "^2023.9.2"
+duckdb-engine = "^0.9.2"
+pyiceberg = {extras = ["duckdb", "pandas", "pyarrow"], version = "^0.5.0"}
+
+[tool.poetry.group.dev]
+optional = true
+
+[tool.poetry.group.dev.dependencies]
+black = "^23.9.1"
+isort = "^5.12.0"
+flake8 = "^6.1.0"
+mypy = "^1.6.1"
+pre-commit = "^3.5.0"
+
+[tool.poetry.group.deploy]
+optional = true
+
+[tool.poetry.group.deploy.dependencies]
+pex = "^2.1.148"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
