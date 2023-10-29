@@ -4,16 +4,15 @@ Extract & transform (with compute provided by Spark) the [Yelp Academic Dataset]
 
 ## Quickstart (MacOS)
 
-*You'll need [Docker Desktop for MacOS.](https://docs.docker.com/desktop/install/mac-install/) installed and running. Have >=3 cores and >=8g RAM available.*
+*You'll need [Docker Desktop for MacOS.](https://docs.docker.com/desktop/install/mac-install/) installed and running. Have >=4 cores and >=16g RAM available.*
 
 Initialize data lake buckets & prefixes in Minio.
-
-TODO: Why are Iceberg files written to the yelp Minio bucket? Weird! We'd expect warehouse bucket based on our configuration in comparison with [tabular-io/docker-spark-iceberg](https://github.com/tabular-io/docker-spark-iceberg/).
 
 ```zsh
 mkdir -p data/warehouse/lake
 mkdir -p data/yelp/json
 mkdir -p data/etl/spark/yelp-etl
+mkdir -p data/log/spark/spark-logs
 ```
 
 Download data from Yelp instructions.
@@ -29,28 +28,27 @@ Create Python app deployment files.
 ```zsh
 cp app.py data/etl/spark/yelp-etl/
 zip -vr data/etl/spark/yelp-etl/yelp_etl.zip yelp_etl/*
-# TODO: PEX deployment for shipping dependencies dynamically to Spark nodes?
-# poetry run \
-#     pex pyspark s3fs -o ./data/yelp-etl/pyspark_pex_env.pex
 ```
 
-Run Spark Master + Worker and Minio (S3) locally with an Iceberg-capable REST catalog.
+Run Spark Master + Worker and Minio (S3) locally.
 
 ```zsh
 docker-compose up --build -d
 ```
 
-Observe ETL in the data lake with UIs!
+Observe ETL in the data lake with UIs.
 
 ```zsh
 open http://localhost:9001/ # minio console
 open http://localhost:8080/ # spark master
 open http://localhost:8081/ # spark worker
+open http://localhost:4040/ # spark jobs
 ```
 
 Run all pipelines with spark-submit.
 
 ```zsh
+# Get an interactive bash shell
 docker exec -it spark-master /bin/bash
 ```
 
@@ -71,26 +69,40 @@ For `--pipeline=bronze`, acceptable values of `--table_name` are 'business', 're
 
 ```bash
 /opt/spark/bin/spark-submit \
+    --conf spark.driver.cores=1 \
+    --conf spark.driver.memory=4g \
+    --conf spark.driver.maxResultSize=4g \
+    --conf spark.executor.cores=1 \
+    --conf spark.executor.memory=4g \
+    --conf spark.sql.shuffle.partitions=8 \
+    --num-executors=2 \
     --py-files s3a://etl/spark/yelp-etl/yelp_etl.zip \
     s3a://etl/spark/yelp-etl/app.py \
     --pipeline bronze \
+    --buckets 8 \
     --input_path s3a://yelp/json \
     --namespace yelp \
     --table_name business \
     --bucket_col business_id
-
-# TODO: PEX deployment?
-# --files "s3a://yelp-etl/pyspark_pex_env.pex" # Are --files copied to the node OS somewhere?
-# --conf spark.pyspark.python="s3a://yelp-etl/pyspark_pex_env.pex" # Doesn't work. It looks locally.
 ```
 
 For `--pipeline=silver`, there is no reason to modify the following command to create silver tables.
 
 ```bash
 /opt/spark/bin/spark-submit \
+    --conf spark.driver.cores=1 \
+    --conf spark.driver.memory=4g \
+    --conf spark.driver.memoryOverheadFactor=0.2 \
+    --conf spark.driver.maxResultSize=4g \
+    --conf spark.executor.cores=1 \
+    --conf spark.executor.memory=4g \
+    --conf spark.executor.memoryOverheadFactor=0.2 \
+    --conf spark.sql.shuffle.partitions=8 \
+    --num-executors=2 \
     --py-files s3a://etl/spark/yelp-etl/yelp_etl.zip \
     s3a://etl/spark/yelp-etl/app.py \
     --pipeline silver \
+    --buckets 8 \
     --namespace yelp
 ```
 
@@ -109,7 +121,6 @@ poetry install --include dev
 Run tests.
 
 ```zsh
-# TODO: Add Python tests! Lol, data engineers SMDH.
 poetry run python -m unittest
 ```
 
