@@ -1,12 +1,26 @@
 repos:
 -   repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v2.3.0
+    rev: v4.5.0
     hooks:
     -   id: check-yaml
     -   id: end-of-file-fixer
     -   id: trailing-whitespace
-# TODO: Add poetry, formatting, & linting tools as pre-commit hooks.
-# -   repo: https://github.com/psf/black
-#     rev: 22.10.0
-#     hooks:
-#     -   id: black
+-   repo: https://github.com/python-poetry/poetry
+    rev: 1.6.1
+    hooks:
+    -   id: poetry-check
+    -   id: poetry-lock
+    -   id: poetry-export
+-   repo: https://github.com/psf/black
+    rev: 23.9.1
+    hooks:
+    -   id: black
+-   repo: https://github.com/pycqa/isort
+    rev: 5.12.0
+    hooks:
+    -   id: isort
+-   repo: https://github.com/PyCQA/flake8
+    rev: 6.1.0
+    hooks:
+    -   id: flake8
+        args: [--max-line-length=119]

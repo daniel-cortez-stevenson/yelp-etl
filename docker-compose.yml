@@ -1,23 +1,21 @@
 version: "3.9"
 
-x-app-common: &app-common
+x-spark-common: &spark-common
   env_file:
-    - docker-compose.env
+    - docker-compose.spark.env
   networks:
     datalake_net:
 
 services:
   master:
-    <<: *app-common
+    <<: *spark-common
     build: .
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "-h", "master"]
     container_name: spark-master
     environment:
       MASTER: spark://master:7077
-      SPARK_CONF_DIR: /opt/spark/conf
       SPARK_DRIVER_CORES: 1
       SPARK_DRIVER_MEMORY: 4g
-      SPARK_PUBLIC_DNS: localhost
     ports:
       # - 7077:7077  # TODO: Allow local submission to submit-spark endpoint
       - 8080:8080
@@ -26,11 +24,10 @@ services:
       - minio
 
   worker:
-    <<: *app-common
+    <<: *spark-common
     build: .
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://master:7077"]
     environment:
-      SPARK_CONF_DIR: /opt/spark/conf
       SPARK_WORKER_CORES: 2
       SPARK_WORKER_MEMORY: 8g
     ports:
@@ -41,9 +38,8 @@ services:
   minio:
     image: minio/minio:RELEASE.2022-05-26T05-48-41Z # If upgrading tag, see https://stackoverflow.com/a/73047454/22623325
     command: ["server", "/data", "--console-address", ":9001"]
-    container_name: minio
     env_file:
-      - docker-compose-minio.env
+      - docker-compose.minio.env
     environment:
       MINIO_DOMAIN: minio
     ports:

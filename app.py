@@ -12,7 +12,7 @@ import argparse
 import importlib
 import logging
 
-from yelp_etl.spark import setup_spark_session
+from pyspark.sql import SparkSession
 
 logging.basicConfig(level="INFO")
 _logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ PIPELINE_MODULE = "yelp_etl.pipeline"
 def main(known_args, additional_args_dict):
     _logger.info(f"Starting data processing using pipeline {known_args.pipeline}")
 
-    spark = setup_spark_session(known_args)
+    spark = SparkSession.builder.appName("Yelp ETL in Iceberg data lake").getOrCreate()
 
     # Import and run the specified pipeline function
     pipeline_module = importlib.import_module(

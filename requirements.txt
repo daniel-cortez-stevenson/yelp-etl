@@ -1,0 +1,5 @@
+py4j==0.10.9.7 ; python_full_version >= "3.8.1" and python_full_version < "3.9.0" \
+    --hash=sha256:0b6e5315bb3ada5cf62ac651d107bb2ebc02def3dee9d9548e3baac644ea8dbb \
+    --hash=sha256:85defdfd2b2376eb3abf5ca6474b51ab7e0de341c75a02f46dc9b5976f5a5c1b
+pyspark==3.5.0 ; python_full_version >= "3.8.1" and python_full_version < "3.9.0" \
+    --hash=sha256:d41a9b76bd2aca370a6100d075c029e22ba44c5940927877e9435a3a9c566558
