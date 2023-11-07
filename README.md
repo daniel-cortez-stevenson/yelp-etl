@@ -124,12 +124,11 @@ Run tests.
 poetry run python -m unittest
 ```
 
-Format & lint.
+Format & lint with `pre-commit`.
 
 ```zsh
-poetry run black yelp_etl/ tests/ app.py
-poetry run isort yelp_etl/ tests/ app.py
-poetry run flake8 --max-line-length 119 yelp_etl/ tests/ app.py
+poetry run pre-commit install
+# Format & lint happen automatically on commit.
 ```
 
 ## Development Environment (MacOS)
