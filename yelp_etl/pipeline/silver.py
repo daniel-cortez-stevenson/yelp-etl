@@ -140,7 +140,7 @@ def silver(
     ):
         df.printSchema()
         df.show()
-        iceberg_output_table = ".".join(
+        output_iceberg_table = ".".join(
             [
                 spark.conf.get("spark.sql.defaultCatalog"),
                 known_args.pipeline,
@@ -150,7 +150,7 @@ def silver(
         )
 
         _logger.info(f"Writing to Iceberg table at {output_iceberg_table}")
-        df.writeTo(iceberg_output_table).partitionedBy(
+        df.writeTo(output_iceberg_table).partitionedBy(
             F.bucket(known_args.buckets, f"{table_name.split('_')[0]}_id")
         ).using("iceberg").option("write.object-storage.enabled", True).option(
             "write.data.path", spark.conf.get("spark.sql.catalog.lake.warehouse")
