@@ -85,7 +85,33 @@ def silver(
     business = business.select(
         flattenStructSchema(business.schema, None, ["attributes"])
     )
-    new_attribute_columnNames = set(business.columns) - set(start_columnNames)
+    new_attribute_columnNames = list(set(business.columns) - set(start_columnNames))
+
+    # Clean the string data so that we can auto-cast
+    for columnName in new_attribute_columnNames:
+        # Clean up unicode string values
+        business = business.withColumn(
+            columnName, F.regexp_replace(columnName, "^u'(.*)'$", "$1")
+        )
+        business = business.withColumn(
+            columnName, F.regexp_replace(columnName, "u('.*?')", "$1")
+        )
+        # Convert "None" or "none" to NULL
+        business = business.withColumn(
+            columnName, F.regexp_replace(columnName, "'none'", "None")
+        )
+        business = business.withColumn(columnName, none_as_null(columnName))
+        # Create Valid JSON that could be cast to a Map<String, Boolean>
+        business = business.withColumn(
+            columnName, F.regexp_replace(columnName, "None", "null")
+        )
+        business = business.withColumn(
+            columnName, F.regexp_replace(columnName, "False", "false")
+        )
+        business = business.withColumn(
+            columnName, F.regexp_replace(columnName, "True", "true")
+        )
+
     business = convertJSONColumnsOrCast(
         business,
         new_attribute_columnNames,
@@ -241,17 +267,17 @@ def convertJSONColumnsOrCast(df, columnNames: List[str], json_schema, fallback_t
     for columnName in columnNames:
         json_columnName = f"{columnName}_json"
         df = df.withColumn(json_columnName, F.from_json(columnName, json_schema))
-        df = drop_fully_null_columns(df, [json_columnName])
+        df = drop_column_based_on_nulls(df, json_columnName, columnName)
         if json_columnName not in df.columns:
             cast_columnName = f"{columnName}_cast"
             df = df.withColumn(cast_columnName, F.col(columnName).cast(fallback_type))
-            df = drop_fully_null_columns(df, [cast_columnName])
+            df = drop_column_based_on_nulls(df, cast_columnName, columnName)
             if cast_columnName in df.columns:
                 df = df.drop(columnName)
                 df = df.withColumnRenamed(cast_columnName, columnName)
                 _logger.info(f"Converted {columnName} to {fallback_type}")
             else:
-                _logger.info(f"Converted {columnName} to StringType")
+                _logger.info(f"Keep {columnName} as StringType")
         else:
             df = df.drop(columnName)
             df = df.withColumnRenamed(json_columnName, columnName)
@@ -259,30 +285,29 @@ def convertJSONColumnsOrCast(df, columnNames: List[str], json_schema, fallback_t
     return df
 
 
-def drop_fully_null_columns(df, check_columns=[]):
-    """Drops DataFrame columns that are fully null
-    (i.e. the maximum value is null)
-    https://stackoverflow.com/a/65361020/22623325
+def drop_column_based_on_nulls(df, col, check_col):
+    """Drops the first column if the second column has fewer NULL values.
 
     Arguments:
         df {spark DataFrame} -- spark dataframe
-        check_columns {list} -- list of columns to check for nulls
+        col {str} -- name of the column to potentially drop
+        check_col {str} -- name of the column to use as the baseline for nulls
 
     Returns:
-        spark DataFrame -- dataframe with fully null columns removed
+        spark DataFrame -- dataframe with the specified column removed if condition is met
     """
-    if len(check_columns) > 0:
-        # drop columns for which the max is None
-        rows_with_data = (
-            df.select(*check_columns)
-            .groupby()
-            .agg(
-                *[F.max(F.col(c).cast(T.StringType())).alias(c) for c in check_columns]
-            )
-            .take(1)[0]
-        )
-        cols_to_drop = [
-            c for c, const in rows_with_data.asDict().items() if const is None
-        ]
-        df = df.drop(*cols_to_drop)
+    # Count NULLs in both columns
+    null_counts = df.select(
+        F.count(F.when(F.col(col).isNull(), 1)).alias("col"),
+        F.count(F.when(F.col(check_col).isNull(), 1)).alias("check_col"),
+    ).collect()[0]
+    # Drop col if check_col has fewer NULL values
+    if null_counts["col"] > null_counts["check_col"]:
+        df = df.drop(col)
     return df
+
+
+def none_as_null(columnName: str):
+    return F.when(F.lower(F.col(columnName)) == "none", None).otherwise(
+        F.col(columnName)
+    )
