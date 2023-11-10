@@ -65,45 +65,76 @@ docker-compose down -v
 
 ## Running Pipelines
 
-For `--pipeline=bronze`, acceptable values of `--table_name` are 'business', 'review', 'user', 'checkin', or 'tip'. A better name for `--table_name` would have been `--entity_type`. The `--bucket_col` value must be a top-level key in an entity type's JSON schema.
+Get help by executing:
 
 ```bash
-/opt/spark/bin/spark-submit \
-    --conf spark.driver.cores=1 \
-    --conf spark.driver.memory=4g \
-    --conf spark.driver.maxResultSize=4g \
-    --conf spark.executor.cores=1 \
-    --conf spark.executor.memory=4g \
-    --conf spark.sql.shuffle.partitions=8 \
-    --num-executors=2 \
-    --py-files s3a://etl/spark/yelp-etl/yelp_etl.zip \
-    s3a://etl/spark/yelp-etl/app.py \
-    --pipeline bronze \
-    --buckets 8 \
-    --input_path s3a://yelp/json \
-    --namespace yelp \
-    --table_name business \
-    --bucket_col business_id
+python app.py --help
 ```
 
-For `--pipeline=silver`, there is no reason to modify the following command to create silver tables.
+Extraction pipelines `--pipeline extract`
 
 ```bash
 /opt/spark/bin/spark-submit \
     --conf spark.driver.cores=1 \
     --conf spark.driver.memory=4g \
-    --conf spark.driver.memoryOverheadFactor=0.2 \
     --conf spark.driver.maxResultSize=4g \
     --conf spark.executor.cores=1 \
     --conf spark.executor.memory=4g \
-    --conf spark.executor.memoryOverheadFactor=0.2 \
     --conf spark.sql.shuffle.partitions=8 \
     --num-executors=2 \
     --py-files s3a://etl/spark/yelp-etl/yelp_etl.zip \
     s3a://etl/spark/yelp-etl/app.py \
-    --pipeline silver \
+    --input s3a://yelp/json/yelp_academic_dataset_user.json \
+    --output lake.bronze.yelp.user \
+    --entity_type user \
+    --pipeline extract \
+    --bucket_column user_id \
+    --buckets 8
+```
+
+Cleaning pipelines `--pipeline clean`
+
+```bash
+/opt/spark/bin/spark-submit \
+    --conf spark.driver.cores=1 \
+    --conf spark.driver.memory=4g \
+    --conf spark.driver.maxResultSize=4g \
+    --conf spark.executor.cores=1 \
+    --conf spark.executor.memory=4g \
+    --conf spark.sql.shuffle.partitions=8 \
+    --num-executors=2 \
+    --py-files s3a://etl/spark/yelp-etl/yelp_etl.zip \
+    s3a://etl/spark/yelp-etl/app.py \
+    --input lake.bronze.yelp.business \
+    --output lake.silver.yelp.business \
+    --entity_type business \
+    --pipeline clean \
+    --bucket_column business_id \
+    --buckets 8
+```
+
+Enrichment pipelines `--pipeline enrich`
+
+```bash
+/opt/spark/bin/spark-submit \
+    --conf spark.driver.cores=1 \
+    --conf spark.driver.memory=4g \
+    --conf spark.driver.maxResultSize=4g \
+    --conf spark.executor.cores=1 \
+    --conf spark.executor.memory=4g \
+    --conf spark.sql.shuffle.partitions=8 \
+    --num-executors=2 \
+    --py-files s3a://etl/spark/yelp-etl/yelp_etl.zip \
+    s3a://etl/spark/yelp-etl/app.py \
+    --input lake.silver.yelp.tip \
+    --output lake.silver.yelp.user_business_tip \
+    --entity_type tip \
+    --pipeline enrich \
+    --partition_column date_year \
+    --bucket_column business_id \
     --buckets 8 \
-    --namespace yelp
+    --dimension_inputs lake.silver.yelp.business,lake.silver.yelp.user \
+    --dimension_entity_types business,user
 ```
 
 TODO: Add gold pipeline examples.

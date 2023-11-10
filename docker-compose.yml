@@ -17,7 +17,7 @@ services:
       SPARK_DRIVER_CORES: 1
       SPARK_DRIVER_MEMORY: 4g
     ports:
-      # - 7077:7077  # TODO: Allow local submission to submit-spark endpoint
+      # - 7077:7077
       - 8080:8080
       - 4040:4040
     depends_on:
