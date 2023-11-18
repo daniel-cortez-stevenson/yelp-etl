@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
@@ -10,6 +10,7 @@ from yelp_etl.common.write import create_iceberg_writer, create_partition_args
 
 if TYPE_CHECKING:
     from argparse import Namespace
+    from typing import List, Union
 
     from pyspark.sql import Column, DataFrame, SparkSession
 
@@ -54,51 +55,65 @@ def process(
         df = df.withColumn(
             "date", F.explode(F.split("date", ", ", limit=-1))
         ).withColumn("checkin_id", F.monotonically_increasing_id())
-
     # Business-specific cleaning
     if known_args.entity_type == "business":
         df = df.withColumn("is_open", F.col("is_open").cast(T.BooleanType()))
         df = df.withColumn("categories", F.split("categories", ", ", limit=-1))
-        start_columns = df.columns
+        start_column_names = df.columns
+        # Attributes
         df = df.select(flatten_stuct_schema(df.schema, None, ["attributes"]))
-        new_attribute_columns = list(set(df.columns) - set(start_columns))
-
-        # Clean the string data so that we can auto-cast
-        for column in new_attribute_columns:
-            # Clean up unicode string values
-            df = df.withColumn(column, F.regexp_replace(column, "^u'(.*)'$", "$1"))
-            df = df.withColumn(column, F.regexp_replace(column, "u('.*?')", "$1"))
+        attribute_column_names = list(set(df.columns) - set(start_column_names))
+        for column_name in attribute_column_names:
+            # Clean the string data so that we can convert without creating NULLs
+            # Clean up unicode characters and extra single quotation marks
+            df = df.withColumn(
+                column_name, F.regexp_replace(column_name, r"^u'(.*)'$", "$1")
+            )
+            df = df.withColumn(
+                column_name, F.regexp_replace(column_name, r"u('.*?')", "$1")
+            )
+            df = df.withColumn(
+                column_name, F.regexp_replace(column_name, r"'none'", "none")
+            )
             # Convert "None" or "none" to NULL
-            df = df.withColumn(column, F.regexp_replace(column, "'none'", "None"))
-            df = df.withColumn(column, none_as_null(column))
-            # Create Valid JSON that could be cast to a Map<String, Boolean>
-            df = df.withColumn(column, F.regexp_replace(column, "None", "null"))
-            df = df.withColumn(column, F.regexp_replace(column, "False", "false"))
-            df = df.withColumn(column, F.regexp_replace(column, "True", "true"))
-
-        df = convert_json_or_cast(
-            df,
-            new_attribute_columns,
-            json_schema=T.MapType(T.StringType(), T.BooleanType()),
-            fallback_type=T.BooleanType(),
-        )
+            df = df.withColumn(
+                column_name,
+                F.when(F.lower(F.col(column_name)) == "none", None).otherwise(
+                    F.col(column_name)
+                ),
+            )
+            # Create Valid JSON that could be cast to a Map<String, Boolean> by from_json()
+            df = df.withColumn(
+                column_name, F.regexp_replace(column_name, r"[Nn]one", "null")
+            )
+            df = df.withColumn(
+                column_name, F.regexp_replace(column_name, r"False", "false")
+            )
+            df = df.withColumn(
+                column_name, F.regexp_replace(column_name, r"True", "true")
+            )
+            df = df.withColumn(
+                column_name,
+                safe_convert_string(
+                    df,
+                    column_name,
+                    [
+                        T.MapType(T.StringType(), T.BooleanType()),
+                        T.MapType(T.StringType(), T.StringType()),
+                        T.BooleanType(),
+                    ],
+                ),
+            )
+        # Opening hours
         df = df.select(flatten_stuct_schema(df.schema, None, ["hours"]))
-
-        days_of_week = [
-            "monday",
-            "tuesday",
-            "wednesday",
-            "thursday",
-            "friday",
-            "saturday",
-            "sunday",
-        ]
-        for day in days_of_week:
-            split_hours_col = F.split(df[f"hours_{day}"], "-")
-            df = df.withColumn(f"hours_{day}_start", split_hours_col.getItem(0))
-            df = df.withColumn(f"hours_{day}_end", split_hours_col.getItem(1))
-            df = df.drop(f"hours_{day}")
-
+        hours_column_names = list(
+            set(df.columns) - set(attribute_column_names) - set(start_column_names)
+        )
+        for column_name in hours_column_names:
+            split_hours_col = F.split(df[column_name], "-")
+            df = df.withColumn(f"{column_name}_start", split_hours_col.getItem(0))
+            df = df.withColumn(f"{column_name}_end", split_hours_col.getItem(1))
+            df = df.drop(f"{column_name}")
     # Create date features for data with a timestamp or date.
     if known_args.entity_type in ["checkin", "review", "tip", "user"]:
         # TODO: Parameterize CLI with --timestamp_column and --timestamp_format
@@ -150,66 +165,35 @@ def flatten_stuct_schema(
     return columns
 
 
-def convert_json_or_cast(
+def safe_convert_string(
     df: DataFrame,
-    columns: List[str],
-    json_schema: T.StructType,
-    fallback_type: T.DataType,
-) -> DataFrame:
-    """Converts columns to a JSON schema or a fallback type if converting the column produces NULL values
+    column_name: str,
+    conversion_types: List[Union[T.DataType, T.StructType]],
+) -> Column:
+    """Attempts to convert a Column to one of the provided types until a valid conversion is found.
+    If a type conversion creates NULLs, it is not valid.
 
-    :param df: DataFrame to transform
-    :param columns: column names to convert
-    :param json_schema: T.StructType representing the JSON schema of the string to convert
-    :param fallback_type: fallback type to convert to if JSON conversion produces NULL values
+    :param df: DataFrame which column_name belongs to
+    :param column_name: name of Column in the DataFrame to convert
+    :param conversion_types: list of types (complex or simple) to try to convert to in the order provided
     """
-    for column in columns:
-        json_column = f"{column}_json"
-        df = df.withColumn(json_column, F.from_json(column, json_schema))
-        df = drop_column_based_on_nulls(df, json_column, column)
-        if json_column not in df.columns:
-            cast_column = f"{column}_cast"
-            df = df.withColumn(cast_column, F.col(column).cast(fallback_type))
-            df = drop_column_based_on_nulls(df, cast_column, column)
-            if cast_column in df.columns:
-                df = df.drop(column)
-                df = df.withColumnRenamed(cast_column, column)
-                _logger.info(f"Converted {column} to {fallback_type}")
-            else:
-                _logger.info(f"Did not convert {column} to another type")
-        else:
-            df = df.drop(column)
-            df = df.withColumnRenamed(json_column, column)
-            _logger.info(f"Converted {column} to {json_schema}")
-    return df
-
-
-def drop_column_based_on_nulls(
-    df: DataFrame, column: str, comparison_column: str
-) -> DataFrame:
-    """Drops a Column if the comparison Column has fewer NULL values.
-
-    : param df: DataFrame to transform
-    : param column: Column name to potentially drop
-    : param comparison_column: Column name to use as the baseline for nulls
-    """
+    if len(conversion_types) == 0:
+        _logger.info(f"Did not convert {column_name} to any type")
+        return F.col(column_name)
+    target_type = conversion_types.pop(0)
+    if isinstance(target_type, T.StructType) or isinstance(target_type, T.MapType):
+        converted_column = F.from_json(F.col(column_name), target_type)
+    else:
+        converted_column = F.col(column_name).cast(target_type)
+    # Count nulls in the original column and the converted column
     counts = df.select(
-        F.count(F.when(F.col(column).isNull(), 1)).alias("null_count"),
-        F.count(F.when(F.col(comparison_column).isNull(), 1)).alias(
-            "max_allowed_null_count"
-        ),
+        F.count(F.when(F.col(column_name).isNull(), 1)).alias("max_allowed_null_count"),
+        F.count(F.when(converted_column.isNull(), 1)).alias("null_count"),
     ).collect()[0]
-    if counts["null_count"] > counts["max_allowed_null_count"]:
-        df = df.drop(column)
-    return df
-
-
-def none_as_null(column: str) -> Column:
-    """Converts "None" or "none" to NULL for a DataFrame Column.
-
-    : param column: Column name of T.StringType Column to convert
-    """
-    return F.when(F.lower(F.col(column)) == "none", None).otherwise(F.col(column))
+    if counts["null_count"] <= counts["max_allowed_null_count"]:
+        _logger.info(f"Converted {column_name} to {target_type}")
+        return converted_column
+    return safe_convert_string(df, column_name, conversion_types)
 
 
 def create_date_features(
