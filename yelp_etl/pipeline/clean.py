@@ -110,9 +110,23 @@ def process(
             set(df.columns) - set(attribute_column_names) - set(start_column_names)
         )
         for column_name in hours_column_names:
-            split_hours_col = F.split(df[column_name], "-")
-            df = df.withColumn(f"{column_name}_start", split_hours_col.getItem(0))
-            df = df.withColumn(f"{column_name}_end", split_hours_col.getItem(1))
+            split_hours_col = F.split(df[column_name], r"[-:]")
+            df = df.withColumn(
+                f"{column_name}_start_hour",
+                split_hours_col.getItem(0).cast(T.IntegerType()),
+            )
+            df = df.withColumn(
+                f"{column_name}_start_minute",
+                split_hours_col.getItem(1).cast(T.IntegerType()),
+            )
+            df = df.withColumn(
+                f"{column_name}_end_hour",
+                split_hours_col.getItem(2).cast(T.IntegerType()),
+            )
+            df = df.withColumn(
+                f"{column_name}_end_minute",
+                split_hours_col.getItem(3).cast(T.IntegerType()),
+            )
             df = df.drop(f"{column_name}")
     # Create date features for data with a timestamp or date.
     if known_args.entity_type in ["checkin", "review", "tip", "user"]:
